@@ -1,0 +1,82 @@
+#!/bin/sh
+set -eu
+
+SCRIPT_DIR="$(dirname "$(realpath "$0")")"
+
+# shellcheck disable=SC2059
+msg() { printf "%s\n" "$*" >&2; }
+err() { msg "Error:$*"; }
+
+get_ndk_resource() {
+	if test -f "${ndk_file}"; then
+		tmp_data_dir="${SCRIPT_DIR}/tmp"
+		rm -rf "${tmp_data_dir}"
+		mkdir -p "${tmp_data_dir}"
+
+		msg "Unzipping ndk"
+		unzip -q -d "${tmp_data_dir}" "${ndk_file}" \
+			"*/meta/*" \
+			"*/toolchains/llvm/prebuilt/linux-x86_64/sysroot/*" \
+			"*/toolchains/llvm/prebuilt/linux-x86_64/lib/clang/*"
+
+		ndk_dir="$(dirname "$(realpath "$(find "${tmp_data_dir}" -name meta -type d)")")"
+
+		place_cmd="mv"
+	elif test -d "${ndk_file}"; then
+		ndk_dir="${ndk_file}"
+		place_cmd="cp -r"
+	fi
+
+	NDK_META="$(find "${ndk_dir}" -maxdepth 1 -mindepth 1 -name meta -type d)"
+	msg "Removing old meta dir"
+	rm -rf "${SCRIPT_DIR}/meta"
+
+	msg "Placing meta dir"
+	${place_cmd} "${NDK_META}" "${SCRIPT_DIR}/meta"
+
+	NDK_SYSROOT="$(find "${ndk_dir}" -name sysroot -type d)"
+	msg "Removing old sysroot"
+	rm -rf "${SCRIPT_DIR}/sysroot"
+	msg "Placing sysroot"
+	${place_cmd} "${NDK_SYSROOT}" "${SCRIPT_DIR}/sysroot"
+
+	NDK_CLANG_RESOURCE="$(find "${ndk_dir}" -path "*/lib/clang/[0-9][0-9]" -type d)"
+	msg "Removing old clang resource dir"
+	rm -rf "${SCRIPT_DIR}/resource"
+	msg "Placing clang resource dir"
+	${place_cmd} "${NDK_CLANG_RESOURCE}" "${SCRIPT_DIR}/resource"
+
+	msg "Slimming down clang resource dir"
+	find "${SCRIPT_DIR}/resource/lib" \
+		-maxdepth 1 \
+		-mindepth 1 \
+		-not -name linux \
+		-exec rm -rf {} \;
+
+	rm -rf "${SCRIPT_DIR}/tmp"
+}
+
+create_target_wrapper() {
+	API_META="${SCRIPT_DIR}/meta/platforms.json"
+	API_MIN=$(grep -E "\"min\":\ [0-9]+" <"${API_META}" | grep -Eo "[0-9]+")
+	API_MAX=$(grep -E "\"max\":\ [0-9]+" <"${API_META}" | grep -Eo "[0-9]+")
+
+	msg "Creating target wrappers [${API_MIN}-${API_MAX}]"
+	mkdir -p "${SCRIPT_DIR}/bin"
+
+	for api in $(seq "${API_MIN}" 1 "${API_MAX}"); do
+		for abi in aarch64-linux-android armv7a-linux-androideabi x86_64-linux-android i686-linux-android; do
+			for tool in clang clang++; do
+				ln -snf "../target_wrapper" "${SCRIPT_DIR}/bin/${abi}${api}-${tool}"
+			done
+		done
+	done
+}
+
+main() {
+	ndk_file="$1"
+	get_ndk_resource
+	create_target_wrapper
+}
+
+main "$@"

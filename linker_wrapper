@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+
+for argv in "$@"; do
+	case "${argv}" in
+	## Do not link to libssp_nonshared
+	## https://github.com/alpinelinux/aports/blob/master/main/clang17/30-Enable-stack-protector-by-default-for-Alpine-Linux.patch#L10
+	-lssp_nonshared) ;;
+	*) set -- "$@" "${argv}" ;;
+	esac
+	shift
+done
+
+/usr/bin/ld.lld "$@"
